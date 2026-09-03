@@ -20,7 +20,7 @@ url: "https://github.com/CodyJon/agent-grok"
 # Web interface configuration
 ingress: true
 ingress_port: 7681
-panel_icon: mdi:console
+panel_icon: mdi:star-four-points
 panel_title: "Grok Terminal"
 panel_admin: true
 
