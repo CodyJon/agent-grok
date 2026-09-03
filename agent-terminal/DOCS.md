@@ -7,7 +7,7 @@ Grok Build CLI in a web terminal, as a Home Assistant **app** (formerly called a
 Anthropic, or Home Assistant. Based on [Agent Terminal](https://github.com/BONOBOGAMES/agent-terminal)
 and [Claude Terminal](https://github.com/heytcass/home-assistant-addons) (MIT).
 
-Repository: [github.com/CodyJon/agent-terminal](https://github.com/CodyJon/agent-terminal)
+Repository: [github.com/CodyJon/agent-grok](https://github.com/CodyJon/agent-grok)
 
 ## About
 
@@ -23,14 +23,14 @@ plain Container or Core installs.
 
 **One-click repository add:**
 
-[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FCodyJon%2Fagent-terminal)
+[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FCodyJon%2Fagent-grok)
 
 Manual steps:
 
 1. In Home Assistant, open **[Settings → Apps](https://my.home-assistant.io/redirect/supervisor)** and open the app store (**Install app**)
 2. ⋮ → **Repositories** → add:
 
-   `https://github.com/CodyJon/agent-terminal`
+   `https://github.com/CodyJon/agent-grok`
 
 3. Install **Grok Terminal**
 4. (Recommended) Open **Configuration** and set **xai_api_key**
