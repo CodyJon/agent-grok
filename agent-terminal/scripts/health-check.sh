@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-# Health check / grok-doctor for Agent Terminal
+# Health check / grok-doctor for Grok Terminal
 
 check_system_resources() {
     bashio::log.info "=== System Resources Check ==="
@@ -47,22 +47,20 @@ check_directory_permissions() {
 check_grok_cli() {
     bashio::log.info "=== Grok CLI Check ==="
 
-    if command -v grok >/dev/null 2>&1; then
-        bashio::log.info "Grok CLI found at: $(which grok) ✓"
-        local ver
-        ver=$(grok --version 2>/dev/null || echo "version unknown")
-        bashio::log.info "Version: $ver"
-
-        if [ -x "$(which grok)" ]; then
-            bashio::log.info "Grok CLI is executable ✓"
-        else
-            bashio::log.error "Grok CLI is not executable ✗"
-            return 1
-        fi
-    else
+    if ! command -v grok >/dev/null 2>&1; then
         bashio::log.error "Grok CLI not found ✗"
         return 1
     fi
+
+    bashio::log.info "Grok CLI found at: $(command -v grok) ✓"
+
+    local ver
+    if ! ver=$(timeout 10 grok --version 2>&1); then
+        bashio::log.error "Grok is present but does not run (grok --version failed) ✗"
+        bashio::log.error "$ver"
+        return 1
+    fi
+    bashio::log.info "Version: $ver"
 }
 
 check_auth() {
@@ -126,7 +124,7 @@ check_runtime_tools() {
 
 run_diagnostics() {
     bashio::log.info "========================================="
-    bashio::log.info "Agent Terminal — Health Check"
+    bashio::log.info "Grok Terminal — Health Check"
     bashio::log.info "========================================="
 
     local errors=0

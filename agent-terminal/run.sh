@@ -1,7 +1,7 @@
 #!/usr/bin/with-contenv bashio
 
-# Agent Terminal — Grok Build CLI in a browser terminal
-# (ttyd + tmux). Adapted from Claude Terminal (heytcass), MIT.
+# Grok Terminal — Grok Build CLI in a browser terminal (ttyd + tmux).
+# Adapted from Claude Terminal (heytcass) and Agent Terminal (BONOBOGAMES), MIT.
 #
 # Startup philosophy: everything the terminal needs is baked into the image,
 # and nothing on the boot path may depend on the network or block on input.
@@ -11,9 +11,7 @@
 set -e
 set -o pipefail
 
-# Initialize environment for Grok Build CLI using /data (HA best practice)
 init_environment() {
-    # Use /data exclusively - guaranteed writable by HA Supervisor
     local data_home="/data/home"
     local config_dir="/data/.config"
     local cache_dir="/data/.cache"
@@ -30,7 +28,6 @@ init_environment() {
 
     chmod 755 "$data_home" "$config_dir" "$cache_dir" "$state_dir" "$grok_home"
 
-    # XDG + HOME: Grok stores auth/config under ~/.grok
     export HOME="$data_home"
     export XDG_CONFIG_HOME="$config_dir"
     export XDG_CACHE_HOME="$cache_dir"
@@ -40,7 +37,6 @@ init_environment() {
     # Persistent Grok install wins over the image-bundled binary
     export PATH="$grok_home/bin:/usr/local/bin:$PATH"
 
-    # API key from add-on options (recommended path for HA ingress)
     if bashio::config.has_value 'xai_api_key'; then
         local key
         key=$(bashio::config 'xai_api_key')
@@ -50,7 +46,6 @@ init_environment() {
         fi
     fi
 
-    # Install tmux configuration to user home directory
     if [ -f "/opt/scripts/tmux.conf" ]; then
         cp /opt/scripts/tmux.conf "$data_home/.tmux.conf"
         chmod 644 "$data_home/.tmux.conf"
@@ -59,7 +54,6 @@ init_environment() {
     bashio::log.info "Environment initialized (HOME=${HOME})"
 }
 
-# Install user-facing commands into /usr/local/bin
 setup_commands() {
     local entry name script
     for entry in \
@@ -78,40 +72,70 @@ setup_commands() {
         fi
     done
 
-    # Write add-on version for the welcome banner (no bashio inside ttyd)
     bashio::addon.version > /opt/scripts/addon-version 2>/dev/null \
         || echo "unknown" > /opt/scripts/addon-version
 }
 
-# Keep Grok Build current. The copy in the image is frozen at build time,
-# so install the official binary into /data (persists across restarts and
-# add-on updates) and refresh it in the background on each boot.
+# A persistent binary that is +x is not the same as one that runs.
+# If it cannot, delete it so the bundled copy on PATH takes over.
+persistent_grok_runs() {
+    timeout 10 "$HOME/.grok/bin/grok" --version >/dev/null 2>&1
+}
+
+ensure_persistent_grok_usable() {
+    [ -x "$HOME/.grok/bin/grok" ] || return 1
+    if persistent_grok_runs; then
+        return 0
+    fi
+    bashio::log.warning "Persistent Grok is present but fails to run; removing it and falling back to the bundled copy"
+    rm -f "$HOME/.grok/bin/grok"
+    return 1
+}
+
 update_grok() {
+    local persistent_usable=0
+    ensure_persistent_grok_usable || persistent_usable=$?
+
     if [ "$(bashio::config 'grok_auto_update' 'true')" != "true" ]; then
-        bashio::log.info "Grok auto-update disabled; using bundled grok binary"
+        if [ "$persistent_usable" -eq 0 ]; then
+            bashio::log.info "Grok auto-update disabled; using persistent grok binary"
+        else
+            bashio::log.info "Grok auto-update disabled; using bundled grok binary"
+        fi
         return 0
     fi
 
-    if [ -x "$HOME/.grok/bin/grok" ]; then
+    if [ "$persistent_usable" -eq 0 ]; then
         bashio::log.info "Persistent Grok found; checking for updates in background"
         (
-            # Re-run official installer into HOME (static binary under ~/.grok)
-            curl -fsSL --connect-timeout 10 https://x.ai/cli/install.sh | bash >/dev/null 2>&1 || true
-        ) &
-    else
-        bashio::log.info "Installing persistent Grok into /data (background)..."
-        (
-            if curl -fsSL --connect-timeout 10 https://x.ai/cli/install.sh | bash >/dev/null 2>&1 \
-                && [ -x "$HOME/.grok/bin/grok" ]; then
-                bashio::log.info "Persistent Grok installed: $("$HOME/.grok/bin/grok" --version 2>/dev/null || echo 'version unknown')"
-            else
-                bashio::log.warning "Persistent Grok install failed; using bundled copy for now"
+            installer=$(mktemp /tmp/grok-install.XXXXXX.sh)
+            if curl -fsSL --connect-timeout 10 https://x.ai/cli/install.sh -o "$installer"; then
+                bash "$installer" </dev/null >/dev/null 2>&1 || true
+            fi
+            rm -f "$installer"
+            if [ -x "$HOME/.grok/bin/grok" ] && ! persistent_grok_runs; then
+                bashio::log.warning "Updated Grok no longer runs in this image; removing it and falling back to the bundled copy"
+                rm -f "$HOME/.grok/bin/grok"
             fi
         ) &
+        return 0
     fi
+
+    bashio::log.info "Installing persistent Grok into /data (background)..."
+    (
+        installer=$(mktemp /tmp/grok-install.XXXXXX.sh)
+        if curl -fsSL --connect-timeout 10 https://x.ai/cli/install.sh -o "$installer" \
+            && bash "$installer" </dev/null >/dev/null 2>&1 \
+            && [ -x "$HOME/.grok/bin/grok" ] && persistent_grok_runs; then
+            bashio::log.info "Persistent Grok installed: $("$HOME/.grok/bin/grok" --version 2>/dev/null || echo 'version unknown')"
+        else
+            rm -f "$HOME/.grok/bin/grok"
+            bashio::log.warning "Persistent Grok install failed or unrunnable; using bundled copy for now"
+        fi
+        rm -f "$installer"
+    ) &
 }
 
-# Install persistent packages from config and saved state
 install_persistent_packages() {
     local persist_config="/data/persistent-packages.json"
     local apk_packages=""
@@ -170,7 +194,6 @@ install_persistent_packages() {
     fi
 }
 
-# Generate Home Assistant context for Grok sessions (background)
 generate_ha_context() {
     if [ "$(bashio::config 'ha_smart_context' 'true')" != "true" ]; then
         bashio::log.info "HA Smart Context disabled in configuration"
@@ -183,14 +206,11 @@ generate_ha_context() {
     fi
 }
 
-# Build extra flags for every grok launch.
-# Note: the value is word-split; quoted multi-word arguments are not
-# re-parsed (documented limitation).
+# Flags are parsed once, by the shell tmux starts the session command with.
 build_grok_flags() {
     local flags=""
 
     if [ "$(bashio::config 'always_approve' 'false')" = "true" ]; then
-        # Grok equivalent of Claude's --dangerously-skip-permissions
         flags="--permission-mode bypassPermissions"
     fi
 
@@ -203,21 +223,31 @@ build_grok_flags() {
     echo "$flags"
 }
 
-# Determine the command ttyd runs for each client connection
-get_grok_launch_command() {
-    local flags="$1"
-
-    if [ "$(bashio::config 'auto_launch_grok' 'true')" = "true" ]; then
-        # tmux -A attaches to the live session on browser reconnects and HA
-        # navigation instead of stacking new ones
-        echo "tmux new-session -A -s grok 'grok${flags:+ $flags}'"
+get_working_directory() {
+    local dir
+    dir=$(bashio::config 'working_directory' '')
+    if [ -z "$dir" ] || [ "$dir" = "null" ]; then
+        echo "/config"
+        return 0
+    fi
+    if [ -d "$dir" ]; then
+        echo "$dir"
     else
-        # Shell mode: banner + interactive bash, still inside tmux
-        echo "tmux new-session -A -s grok '/usr/local/bin/welcome --shell'"
+        bashio::log.warning "working_directory '$dir' does not exist; starting in /config instead"
+        echo "/config"
     fi
 }
 
-# Start main web terminal
+get_session_command() {
+    local flags="$1"
+
+    if [ "$(bashio::config 'auto_launch_grok' 'true')" = "true" ]; then
+        echo "grok${flags:+ $flags}"
+    else
+        echo "/usr/local/bin/welcome --shell"
+    fi
+}
+
 start_web_terminal() {
     local port=7681
     local flags
@@ -232,16 +262,15 @@ start_web_terminal() {
         bashio::log.warning "=========================================================="
     fi
 
-    local launch_command
-    launch_command=$(get_grok_launch_command "$flags")
+    local session_command workdir
+    session_command=$(get_session_command "$flags")
+    workdir=$(get_working_directory)
 
     bashio::log.info "Starting web terminal on port ${port} (auto_launch_grok=$(bashio::config 'auto_launch_grok' 'true'))"
 
-    # Terminal theme — dark palette with amber accents (not CT terracotta)
     local ttyd_theme='{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#f59e0b","cursorAccent":"#1a1b26","selectionBackground":"#33467c","selectionForeground":"#c0caf5","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
 
-    # keepalive configuration to prevent WebSocket disconnects
-    # See CT issue: https://github.com/heytcass/home-assistant-addons/issues/24
+    # ttyd execs argv directly — no extra bash -c parse of extra_args.
     exec ttyd \
         --port "${port}" \
         --interface 0.0.0.0 \
@@ -252,10 +281,9 @@ start_web_terminal() {
         --client-option reconnectInterval=5 \
         --client-option "theme=${ttyd_theme}" \
         --client-option fontSize=14 \
-        bash -c "$launch_command"
+        tmux new-session -A -s grok -c "$workdir" "$session_command"
 }
 
-# Setup ha-mcp (Home Assistant MCP Server) for Grok Build
 setup_ha_mcp() {
     if [ -f "/opt/scripts/setup-ha-mcp.sh" ]; then
         bashio::log.info "Setting up Home Assistant MCP integration..."
@@ -266,7 +294,7 @@ setup_ha_mcp() {
 }
 
 main() {
-    bashio::log.info "Starting Agent Terminal add-on..."
+    bashio::log.info "Starting Grok Terminal add-on..."
 
     init_environment
     setup_commands

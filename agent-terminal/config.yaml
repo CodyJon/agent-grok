@@ -1,39 +1,40 @@
 ---
-name: "Agent Terminal"
+name: "Grok Terminal"
 description: "Web terminal with xAI Grok Build CLI and persistent auth"
-version: "1.0.3"
-slug: "agent_terminal"
+version: "1.1.0"
+slug: "grok_terminal"
 init: false
 
 # Prebuilt images on GHCR — Supervisor pulls these instead of building
 # locally (no build OOM, no image blobs in backups). Tag = version above.
-image: "ghcr.io/bonobogames/{arch}-addon-agent-terminal"
+image: "ghcr.io/codyjon/{arch}-addon-grok-terminal"
 
-# Supported architectures (armv7 not supported: CT dropped it; no grok armv7)
+# Supported architectures (armv7 not supported: HAOS dropped it; no grok armv7)
 arch:
   - aarch64
   - amd64
 
 # External resources
-url: "https://github.com/BONOBOGAMES/agent-terminal"
+url: "https://github.com/CodyJon/agent-terminal"
 
 # Web interface configuration
 ingress: true
 ingress_port: 7681
 panel_icon: mdi:console
-panel_title: "Agent Terminal"
+panel_title: "Grok Terminal"
 panel_admin: true
 
 # Port configuration
 ports:
   7681/tcp: null
 ports_description:
-  7681/tcp: "Web terminal (not required for ingress)"
+  7681/tcp: "Direct web terminal. Not needed for ingress, and NOT password-protected: anyone who can reach this port gets a root shell in the container, with no Home Assistant login. Leave unset unless the port is firewalled."
 
 # Add-on configuration options
 options:
   auto_launch_grok: true
   grok_auto_update: true
+  working_directory: ""
   xai_api_key: ""
   always_approve: false
   grok_extra_args: ""
@@ -45,6 +46,7 @@ options:
 schema:
   auto_launch_grok: bool?
   grok_auto_update: bool?
+  working_directory: str?
   xai_api_key: password?
   always_approve: bool?
   grok_extra_args: str?
@@ -62,11 +64,16 @@ map:
   - all_addon_configs:rw # Other add-ons' config directories (/addon_configs)
   - share:rw             # Shared folder between add-ons and HA
 
-# API access for Home Assistant integration
+# API access
+# hassio_api + role manager: /addons (HA Smart Context lists installed
+#   add-ons) needs manager; /core/info and /host/info need only default
+# homeassistant_api: the /core/api/* proxy used by ha-context, the tmux
+#   status bar, and ha-mcp
+# No auth_api: that endpoint only validates an HA username/password.
+#   Nothing here calls it.
 hassio_api: true
 hassio_role: manager
 homeassistant_api: true
-auth_api: true
 
 # Service startup configuration
 startup: services

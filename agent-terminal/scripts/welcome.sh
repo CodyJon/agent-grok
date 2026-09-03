@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Agent Terminal banner — compact, non-blocking header.
+# Grok Terminal banner — compact, non-blocking header.
 # With --shell, drops into an interactive bash afterwards (shell mode).
 # Runs inside ttyd/tmux (user-visible) — plain bash, no bashio.
 
@@ -12,7 +12,7 @@ NC='\033[0m'
 version=$(cat /opt/scripts/addon-version 2>/dev/null || echo "unknown")
 
 echo ""
-echo -e "  ${AMBER}Agent Terminal${NC}  ${DIM}v${version} · Home Assistant add-on${NC}"
+echo -e "  ${AMBER}Grok Terminal${NC}  ${DIM}v${version} · Home Assistant add-on${NC}"
 echo ""
 echo -e "  ${WHITE}grok${NC}              start Grok Build  ${DIM}(-c continue · -r resume a session)${NC}"
 echo -e "  ${WHITE}grok-doctor${NC}       diagnose network, auth, and environment issues"

@@ -34,18 +34,16 @@ configure_ha_mcp_server() {
     local version
     version=$(bashio::config 'ha_mcp_version' '7.11.0')
 
-    # Remove existing ha-mcp configuration if present (clean state)
-    grok mcp remove home-assistant 2>/dev/null || true
+    # Local config edits — never block startup if grok wedges.
+    timeout 30 grok mcp remove home-assistant 2>/dev/null || true
 
-    # ha-mcp >= 4.x requires CPython 3.13 exactly, which no Alpine release
-    # ships — uv provisions a managed musl 3.13 build (persisted under /data
-    # via XDG_DATA_HOME, so it downloads once).
-    # --index-strategy unsafe-best-match: the HA wheels index doesn't carry
-    # every version, so let uv consider all indexes (CT #77/#79)
-    if grok mcp add home-assistant \
+    # HOMEASSISTANT_TOKEN is stored as the literal string ${SUPERVISOR_TOKEN}
+    # so the live Supervisor token is not written into /data (HA backups).
+    # shellcheck disable=SC2016
+    if timeout 30 grok mcp add home-assistant \
         --scope user \
         -e "HOMEASSISTANT_URL=http://supervisor/core" \
-        -e "HOMEASSISTANT_TOKEN=${SUPERVISOR_TOKEN}" \
+        -e 'HOMEASSISTANT_TOKEN=${SUPERVISOR_TOKEN}' \
         -- uvx --python 3.13 --index-strategy unsafe-best-match "ha-mcp@${version}"; then
         bashio::log.info "ha-mcp ${version} configured for Grok Build"
 
@@ -54,7 +52,7 @@ configure_ha_mcp_server() {
         bashio::log.info "Pre-warming ha-mcp environment in background"
     else
         bashio::log.warning "Failed to configure ha-mcp - continuing without MCP integration"
-        bashio::log.warning "Manual: grok mcp add home-assistant -e HOMEASSISTANT_URL=http://supervisor/core -e HOMEASSISTANT_TOKEN=\$SUPERVISOR_TOKEN -- uvx --python 3.13 --index-strategy unsafe-best-match ha-mcp@${version}"
+        bashio::log.warning "Manual: grok mcp add home-assistant -e HOMEASSISTANT_URL=http://supervisor/core -e 'HOMEASSISTANT_TOKEN=\${SUPERVISOR_TOKEN}' -- uvx --python 3.13 --index-strategy unsafe-best-match ha-mcp@${version}"
     fi
 }
 
