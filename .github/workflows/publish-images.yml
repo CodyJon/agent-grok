@@ -40,6 +40,6 @@ jobs:
           args: |
             --${{ matrix.arch }} \
             --target /data/agent-terminal \
-            --image "${{ matrix.arch }}-addon-agent-terminal" \
+            --image "${{ matrix.arch }}-addon-grok-terminal" \
             --docker-hub "ghcr.io/${{ github.repository_owner }}" \
             --addon
