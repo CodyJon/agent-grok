@@ -15,7 +15,7 @@ arch:
   - amd64
 
 # External resources
-url: "https://github.com/CodyJon/agent-terminal"
+url: "https://github.com/CodyJon/agent-grok"
 
 # Web interface configuration
 ingress: true

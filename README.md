@@ -20,18 +20,18 @@ Requires [Home Assistant OS](https://www.home-assistant.io/installation/) or Sup
 
 **Quick path** (opens the add-repository dialog on a machine that can reach your HA instance):
 
-[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FCodyJon%2Fagent-terminal)
+[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FCodyJon%2Fagent-grok)
 
 Or manually:
 
 1. Go to **[Settings → Apps](https://my.home-assistant.io/redirect/supervisor)** → open the app store (**Install app** / store icon)
 2. ⋮ (top right) → **Repositories**
-3. Add: `https://github.com/CodyJon/agent-terminal`
+3. Add: `https://github.com/CodyJon/agent-grok`
 4. Find **Grok Terminal**, install, set **xai_api_key** (recommended), start
 
 > Since Home Assistant 2026.2 the UI says **Apps** instead of **Add-ons**. Same Supervisor packaging model.
 
-Prebuilt images are published to GHCR (`ghcr.io/codyjon/{arch}-addon-grok-terminal`). After the first Actions run, set those packages to **public** so Supervisor can pull them.
+Prebuilt images are published to GHCR (`ghcr.io/codyjon/{arch}-addon-grok-terminal`). Packages must be **public** so Supervisor can pull them.
 
 ## Documentation
 

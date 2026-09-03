@@ -5,7 +5,7 @@ xAI **Grok Build** CLI (`grok`) with access to `/config`.
 
 See [DOCS.md](DOCS.md) for installation, options, security notes, and troubleshooting.
 
-**App store repository:** [github.com/CodyJon/agent-terminal](https://github.com/CodyJon/agent-terminal)
+**App store repository:** [github.com/CodyJon/agent-grok](https://github.com/CodyJon/agent-grok)
 
 **Unofficial** — not affiliated with xAI, SpaceXAI, Anthropic, or Home Assistant.
 
