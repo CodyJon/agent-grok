@@ -34,7 +34,6 @@ init_environment() {
     export XDG_STATE_HOME="$state_dir"
     export XDG_DATA_HOME="/data/.local/share"
 
-    # Persistent Grok install wins over the image-bundled binary
     export PATH="$grok_home/bin:/usr/local/bin:$PATH"
 
     if bashio::config.has_value 'xai_api_key'; then
@@ -76,8 +75,6 @@ setup_commands() {
         || echo "unknown" > /opt/scripts/addon-version
 }
 
-# A persistent binary that is +x is not the same as one that runs.
-# If it cannot, delete it so the bundled copy on PATH takes over.
 persistent_grok_runs() {
     timeout 10 "$HOME/.grok/bin/grok" --version >/dev/null 2>&1
 }
@@ -206,7 +203,6 @@ generate_ha_context() {
     fi
 }
 
-# Flags are parsed once, by the shell tmux starts the session command with.
 build_grok_flags() {
     local flags=""
 
@@ -254,34 +250,22 @@ start_web_terminal() {
     flags=$(build_grok_flags)
 
     if [[ "$flags" == *"bypassPermissions"* ]] || [[ "$flags" == *"--always-approve"* ]]; then
-        bashio::log.warning "=========================================================="
         bashio::log.warning "always_approve / bypassPermissions is ENABLED."
-        bashio::log.warning "Grok will run tools without asking for confirmation."
-        bashio::log.warning "It has write access to /config and can control Home"
-        bashio::log.warning "Assistant through the Supervisor API and MCP."
-        bashio::log.warning "=========================================================="
     fi
 
     local session_command workdir
     session_command=$(get_session_command "$flags")
     workdir=$(get_working_directory)
 
-    bashio::log.info "Starting web terminal on port ${port} (auto_launch_grok=$(bashio::config 'auto_launch_grok' 'true'))"
+    bashio::log.info "Starting web terminal on port ${port} with dictate/paste bar"
 
     local ttyd_theme='{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#f59e0b","cursorAccent":"#1a1b26","selectionBackground":"#33467c","selectionForeground":"#c0caf5","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
 
-    # ttyd execs argv directly — no extra bash -c parse of extra_args.
-    exec ttyd \
-        --port "${port}" \
-        --interface 0.0.0.0 \
-        --writable \
-        --ping-interval 30 \
-        --client-option enableReconnect=true \
-        --client-option reconnect=10 \
-        --client-option reconnectInterval=5 \
-        --client-option "theme=${ttyd_theme}" \
-        --client-option fontSize=14 \
-        tmux new-session -A -s grok -c "$workdir" "$session_command"
+    export GROK_TTYD_WORKDIR="$workdir"
+    export GROK_TTYD_CMD="$session_command"
+    export GROK_TTYD_THEME="$ttyd_theme"
+    chmod +x /opt/scripts/start-ttyd.sh /opt/scripts/overlay_proxy.py 2>/dev/null || true
+    exec /opt/scripts/start-ttyd.sh
 }
 
 setup_ha_mcp() {
