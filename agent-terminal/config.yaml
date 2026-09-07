@@ -1,36 +1,29 @@
 ---
 name: "Grok Terminal"
 description: "Web terminal with xAI Grok Build CLI and persistent auth"
-version: "1.2.0"
+version: "1.2.1"
 slug: "grok_terminal"
 init: false
 
-# Prebuilt images on GHCR — Supervisor pulls these instead of building
-# locally (no build OOM, no image blobs in backups). Tag = version above.
 image: "ghcr.io/codyjon/{arch}-addon-grok-terminal"
 
-# Supported architectures (armv7 not supported: HAOS dropped it; no grok armv7)
 arch:
   - aarch64
   - amd64
 
-# External resources
 url: "https://github.com/CodyJon/agent-grok"
 
-# Web interface configuration
 ingress: true
 ingress_port: 7681
 panel_icon: mdi:star-four-points
 panel_title: "Grok Terminal"
 panel_admin: true
 
-# Port configuration
 ports:
   7681/tcp: null
 ports_description:
   7681/tcp: "Direct web terminal. Not needed for ingress, and NOT password-protected: anyone who can reach this port gets a root shell in the container, with no Home Assistant login. Leave unset unless the port is firewalled."
 
-# Add-on configuration options
 options:
   auto_launch_grok: true
   grok_auto_update: true
@@ -58,25 +51,15 @@ schema:
   persistent_pip_packages:
     - str
 
-# Volume mappings for file access
 map:
-  - config:rw            # Home Assistant configuration files
-  - all_addon_configs:rw # Other add-ons' config directories (/addon_configs)
-  - share:rw             # Shared folder between add-ons and HA
+  - config:rw
+  - all_addon_configs:rw
+  - share:rw
 
-# API access
-# hassio_api + role manager: /addons (HA Smart Context lists installed
-#   add-ons) needs manager; /core/info and /host/info need only default
-# homeassistant_api: the /core/api/* proxy used by ha-context, the tmux
-#   status bar, and ha-mcp
-# No auth_api: that endpoint only validates an HA username/password.
-#   Nothing here calls it.
 hassio_api: true
 hassio_role: manager
 homeassistant_api: true
 
-# Service startup configuration
 startup: services
 
-# Web UI access URL
 webui: http://[HOST]:[PORT:7681]/
