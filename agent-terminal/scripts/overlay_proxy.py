@@ -7,8 +7,6 @@ import sys
 
 from aiohttp import ClientSession, WSMsgType, web
 
-INJECT = b'<script src="/grok-overlay.js"></script></body>'
-
 
 def load_overlay() -> bytes:
     for path in (
@@ -21,6 +19,14 @@ def load_overlay() -> bytes:
         except OSError:
             continue
     return b"console.warn('grok overlay missing');\n"
+
+
+def inject_html(body: bytes) -> bytes:
+    tag = b"<script>" + load_overlay() + b"</script>"
+    for marker in (b"</body>", b"</BODY>", b"</html>", b"</HTML>"):
+        if marker in body:
+            return body.replace(marker, tag + marker, 1)
+    return body + tag
 
 
 async def handle_overlay(_request: web.Request) -> web.Response:
@@ -40,16 +46,17 @@ async def proxy(request: web.Request) -> web.StreamResponse:
     hdrs = {
         k: v
         for k, v in request.headers.items()
-        if k.lower() not in {"host", "content-length", "transfer-encoding", "connection"}
+        if k.lower() not in {"host", "content-length", "transfer-encoding", "connection", "accept-encoding"}
     }
+    hdrs["Accept-Encoding"] = "identity"
     data = await request.read() if request.can_read_body else None
     async with request.app["session"].request(
         request.method, url, headers=hdrs, data=data, allow_redirects=False
     ) as resp:
         body = await resp.read()
         ctype = resp.headers.get("Content-Type", "")
-        if "text/html" in ctype and b"</body>" in body:
-            body = body.replace(b"</body>", INJECT, 1)
+        if "text/html" in ctype or request.path in {"", "/"}:
+            body = inject_html(body)
         headers = {
             k: v
             for k, v in resp.headers.items()
