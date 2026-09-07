@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Bottom bar on the web terminal: Mic, Paste, Esc, Tab, Ctrl-C, Enter
+- Mic uses the browser speech API and inserts **one** final transcript
+  (avoids iPhone keyboard dictation doubling words into xterm)
+- Paste falls back to a prompt when the clipboard is blocked
+- Open the terminal in a Safari tab if the sidebar iframe blocks the mic
+
 ## 1.1.0
 
 Personal fork of BONOBOGAMES/agent-terminal 1.0.3, rebranded and brought
