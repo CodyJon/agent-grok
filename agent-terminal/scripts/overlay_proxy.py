@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Proxy ttyd and inject the Grok mobile bar into HTML responses."""
-import argparse
+"""Inject the mobile bar into ttyd HTML. Websockets are spliced raw.
+
+The previous aiohttp websocket client rewrote ttyd frames and left a blank
+terminal until refresh. A byte pipe does not touch the protocol.
+"""
 import asyncio
 import os
 import sys
 
-from aiohttp import ClientSession, WSMsgType, web
+LISTEN = int(sys.argv[sys.argv.index("--listen") + 1]) if "--listen" in sys.argv else 7681
+UPSTREAM = int(sys.argv[sys.argv.index("--upstream") + 1]) if "--upstream" in sys.argv else 7682
 
 
 def load_overlay() -> bytes:
-    for path in (
-        "/opt/scripts/overlay.js",
-        os.path.join(os.path.dirname(__file__), "overlay.js"),
-    ):
+    for path in ("/opt/scripts/overlay.js", os.path.join(os.path.dirname(__file__), "overlay.js")):
         try:
             with open(path, "rb") as fh:
                 return fh.read()
@@ -21,112 +22,120 @@ def load_overlay() -> bytes:
     return b"console.warn('grok overlay missing');\n"
 
 
-def inject_html(body: bytes) -> bytes:
+def inject(body: bytes) -> bytes:
     tag = b"<script>" + load_overlay() + b"</script>"
-    for marker in (b"</body>", b"</BODY>", b"</html>", b"</HTML>"):
-        if marker in body:
-            return body.replace(marker, tag + marker, 1)
+    low = body.lower()
+    for marker in (b"</body>", b"</html>"):
+        idx = low.rfind(marker)
+        if idx != -1:
+            return body[:idx] + tag + body[idx:]
     return body + tag
 
 
-async def handle_overlay(_request: web.Request) -> web.Response:
-    return web.Response(
-        body=load_overlay(),
-        content_type="application/javascript; charset=utf-8",
-        headers={"Cache-Control": "no-store"},
-    )
+async def pipe(reader, writer):
+    try:
+        while True:
+            chunk = await reader.read(65536)
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+    except (ConnectionError, asyncio.CancelledError, BrokenPipeError):
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
 
 
-async def proxy(request: web.Request) -> web.StreamResponse:
-    upstream = request.app["upstream"]
-    url = f"http://127.0.0.1:{upstream}{request.path_qs}"
-    if request.headers.get("Upgrade", "").lower() == "websocket":
-        return await ws_proxy(request, url)
-
-    hdrs = {
-        k: v
-        for k, v in request.headers.items()
-        if k.lower() not in {"host", "content-length", "transfer-encoding", "connection", "accept-encoding"}
-    }
-    hdrs["Accept-Encoding"] = "identity"
-    data = await request.read() if request.can_read_body else None
-    async with request.app["session"].request(
-        request.method, url, headers=hdrs, data=data, allow_redirects=False
-    ) as resp:
-        body = await resp.read()
-        ctype = resp.headers.get("Content-Type", "")
-        if "text/html" in ctype or request.path in {"", "/"}:
-            body = inject_html(body)
-        headers = {
-            k: v
-            for k, v in resp.headers.items()
-            if k.lower()
-            not in {"content-length", "transfer-encoding", "content-encoding", "connection"}
-        }
-        return web.Response(status=resp.status, body=body, headers=headers)
+async def read_headers(reader):
+    data = b""
+    while b"\r\n\r\n" not in data and len(data) < 65536:
+        chunk = await reader.read(4096)
+        if not chunk:
+            break
+        data += chunk
+    return data
 
 
-async def ws_proxy(request: web.Request, url: str) -> web.WebSocketResponse:
-    ws_server = web.WebSocketResponse()
-    await ws_server.prepare(request)
-    ws_url = url.replace("http://", "ws://", 1)
-    proto = request.headers.get("Sec-WebSocket-Protocol")
-    async with request.app["session"].ws_connect(
-        ws_url,
-        protocols=[proto] if proto else [],
-        headers={
-            k: v
-            for k, v in request.headers.items()
-            if k.lower() in {"cookie", "origin", "sec-websocket-protocol"}
-        },
-    ) as ws_client:
+async def handle(client_r, client_w):
+    try:
+        req = await read_headers(client_r)
+        if not req:
+            client_w.close()
+            return
+        up_r = up_w = None
+        for _ in range(40):
+            try:
+                up_r, up_w = await asyncio.open_connection("127.0.0.1", UPSTREAM)
+                break
+            except OSError:
+                await asyncio.sleep(0.25)
+        if up_w is None:
+            client_w.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 11\r\n\r\nttyd down\n")
+            await client_w.drain()
+            client_w.close()
+            return
 
-        async def c2s():
-            async for msg in ws_server:
-                if msg.type == WSMsgType.TEXT:
-                    await ws_client.send_str(msg.data)
-                elif msg.type == WSMsgType.BINARY:
-                    await ws_client.send_bytes(msg.data)
-                elif msg.type in {WSMsgType.CLOSE, WSMsgType.ERROR}:
-                    break
+        head, _, rest = req.partition(b"\r\n\r\n")
+        first = head.split(b"\r\n", 1)[0].lower()
+        is_ws = b"upgrade: websocket" in head.lower()
+        if is_ws:
+            up_w.write(req)
+            await up_w.drain()
+            await asyncio.gather(pipe(client_r, up_w), pipe(up_r, client_w))
+            return
 
-        async def s2c():
-            async for msg in ws_client:
-                if msg.type == WSMsgType.TEXT:
-                    await ws_server.send_str(msg.data)
-                elif msg.type == WSMsgType.BINARY:
-                    await ws_server.send_bytes(msg.data)
-                elif msg.type in {WSMsgType.CLOSE, WSMsgType.ERROR}:
-                    break
+        # Only rewrite the document. Everything else is a straight pipe.
+        path = first.split(b" ")[1] if b" " in first else b"/"
+        rewrite = path.split(b"?", 1)[0] in (b"/", b"")
+        up_w.write(req)
+        await up_w.drain()
+        if not rewrite:
+            await asyncio.gather(pipe(client_r, up_w), pipe(up_r, client_w))
+            return
 
-        tasks = [asyncio.create_task(c2s()), asyncio.create_task(s2c())]
-        _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-    await ws_server.close()
-    return ws_server
+        raw = rest
+        while b"\r\n\r\n" not in raw and len(raw) < 2_000_000:
+            chunk = await up_r.read(65536)
+            if not chunk:
+                break
+            raw += chunk
+        hdr, _, body = raw.partition(b"\r\n\r\n")
+        # Read a declared content-length if present so we do not cut the page.
+        clen = 0
+        for line in hdr.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                try:
+                    clen = int(line.split(b":", 1)[1].strip())
+                except ValueError:
+                    clen = 0
+        while clen and len(body) < clen:
+            chunk = await up_r.read(clen - len(body))
+            if not chunk:
+                break
+            body += chunk
+        if b"<html" in body.lower() or b"<!doctype" in body.lower():
+            body = inject(body)
+            lines = [ln for ln in hdr.split(b"\r\n") if not ln.lower().startswith(b"content-length:") and not ln.lower().startswith(b"transfer-encoding:")]
+            hdr = b"\r\n".join(lines) + b"\r\nContent-Length: " + str(len(body)).encode()
+        client_w.write(hdr + b"\r\n\r\n" + body)
+        await client_w.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            client_w.close()
+        except Exception:
+            pass
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--listen", type=int, default=7681)
-    parser.add_argument("--upstream", type=int, default=7682)
-    args = parser.parse_args()
-
-    app = web.Application()
-    app["upstream"] = args.upstream
-    app.router.add_get("/grok-overlay.js", handle_overlay)
-    app.router.add_route("*", "/{path:.*}", proxy)
-
-    async def session_ctx(app: web.Application):
-        app["session"] = ClientSession()
-        yield
-        await app["session"].close()
-
-    app.cleanup_ctx.append(session_ctx)
-    web.run_app(app, host="0.0.0.0", port=args.listen, print=lambda *_: None)
-    return 0
+async def main():
+    server = await asyncio.start_server(handle, "0.0.0.0", LISTEN)
+    async with server:
+        await server.serve_forever()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    asyncio.run(main())
