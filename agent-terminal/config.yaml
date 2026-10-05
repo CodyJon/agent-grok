@@ -1,7 +1,7 @@
 ---
 name: "Grok Terminal"
 description: "Web terminal with xAI Grok Build CLI and persistent auth"
-version: "1.2.1"
+version: "1.2.2"
 slug: "grok_terminal"
 init: false
 
