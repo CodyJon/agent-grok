@@ -18,4 +18,12 @@ ttyd \
   --client-option fontSize=14 \
   tmux new-session -A -s grok -c "$workdir" "$cmd" &
 
+# Give ttyd a moment to bind so the first ingress request does not race.
+for _ in $(seq 1 20); do
+  if nc -z 127.0.0.1 7682 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+
 exec python3 /opt/scripts/overlay_proxy.py --listen 7681 --upstream 7682
