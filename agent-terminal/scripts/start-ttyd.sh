@@ -20,7 +20,7 @@ ttyd \
 
 # Give ttyd a moment to bind so the first ingress request does not race.
 for _ in $(seq 1 20); do
-  if nc -z 127.0.0.1 7682 2>/dev/null; then
+  if (echo >/dev/tcp/127.0.0.1/7682) >/dev/null 2>&1; then
     break
   fi
   sleep 0.25
