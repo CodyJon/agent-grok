@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Inject the mobile bar into ttyd HTML. WebSockets are spliced raw.
 
-Previous versions closed the opposite writer as soon as one direction ended,
-which tore down HA ingress WebSockets and left a blank terminal until refresh.
-This version keeps both directions alive until both sides actually finish,
-and logs every connection so the addon log shows what happened.
+Document requests have Accept-Encoding stripped so ttyd returns plain HTML.
+Otherwise gzip hides </body> and the Mic/Paste bar never appears.
 """
 import asyncio
 import os
@@ -39,8 +37,17 @@ def inject(body: bytes) -> bytes:
     return body + tag
 
 
+def strip_encoding(req: bytes) -> bytes:
+    """Drop Accept-Encoding so upstream sends uncompressed HTML."""
+    head, sep, rest = req.partition(b"\r\n\r\n")
+    lines = [
+        ln for ln in head.split(b"\r\n")
+        if not ln.lower().startswith(b"accept-encoding:")
+    ]
+    return b"\r\n".join(lines) + sep + rest
+
+
 async def pipe(reader, writer, label: str) -> None:
-    """Forward bytes until EOF or error. Does not close the writer itself."""
     try:
         while True:
             chunk = await reader.read(65536)
@@ -65,9 +72,7 @@ async def read_headers(reader) -> bytes:
 
 
 async def read_http_response(up_r, first_chunk: bytes = b"") -> tuple[bytes, bytes]:
-    """Read a full HTTP response (headers + body). Handles Content-Length and simple close."""
     raw = first_chunk
-    # Ensure we have headers
     while b"\r\n\r\n" not in raw and len(raw) < 2_000_000:
         chunk = await up_r.read(65536)
         if not chunk:
@@ -77,38 +82,33 @@ async def read_http_response(up_r, first_chunk: bytes = b"") -> tuple[bytes, byt
         return raw, b""
     hdr, _, body = raw.partition(b"\r\n\r\n")
     clen = 0
-    chunked = False
     for line in hdr.split(b"\r\n"):
-        low = line.lower()
-        if low.startswith(b"content-length:"):
+        if line.lower().startswith(b"content-length:"):
             try:
                 clen = int(line.split(b":", 1)[1].strip())
             except ValueError:
                 clen = 0
-        if low.startswith(b"transfer-encoding:") and b"chunked" in low:
-            chunked = True
     if clen:
         while len(body) < clen:
             chunk = await up_r.read(clen - len(body))
             if not chunk:
                 break
             body += chunk
-    elif not chunked:
-        # No length and not chunked: read until close (with a safety cap)
+    else:
         while len(body) < 2_000_000:
             chunk = await up_r.read(65536)
             if not chunk:
                 break
             body += chunk
-    # Chunked is rare for ttyd's HTML; fall through with what we have.
     return hdr, body
 
 
 async def handle(client_r, client_w):
     peer = "?"
+    up_w = None
     try:
-        peer = client_w.get_extra_info("peername")
-        peer = f"{peer[0]}:{peer[1]}" if peer else "?"
+        peer_info = client_w.get_extra_info("peername")
+        peer = f"{peer_info[0]}:{peer_info[1]}" if peer_info else "?"
     except Exception:
         pass
 
@@ -145,7 +145,6 @@ async def handle(client_r, client_w):
             log(f"WS open  {peer} {path.decode(errors='replace')}")
             up_w.write(req)
             await up_w.drain()
-            # Keep both directions alive until both finish. Do not close early.
             await asyncio.gather(
                 pipe(client_r, up_w, f"client→ttyd {peer}"),
                 pipe(up_r, client_w, f"ttyd→client {peer}"),
@@ -153,11 +152,13 @@ async def handle(client_r, client_w):
             log(f"WS close {peer}")
             return
 
-        log(f"HTTP {peer} {path.decode(errors='replace')}")
+        rewrite = path in (b"/", b"")
+        if rewrite:
+            req = strip_encoding(req)
+        log(f"HTTP {peer} {path.decode(errors='replace')} rewrite={rewrite}")
         up_w.write(req)
         await up_w.drain()
 
-        rewrite = path in (b"/", b"")
         if not rewrite:
             await asyncio.gather(
                 pipe(client_r, up_w, f"client→ttyd {peer}"),
@@ -172,9 +173,12 @@ async def handle(client_r, client_w):
                 ln for ln in hdr.split(b"\r\n")
                 if not ln.lower().startswith(b"content-length:")
                 and not ln.lower().startswith(b"transfer-encoding:")
+                and not ln.lower().startswith(b"content-encoding:")
             ]
             hdr = b"\r\n".join(lines) + b"\r\nContent-Length: " + str(len(body)).encode()
             log(f"injected overlay ({len(body)} bytes)")
+        else:
+            log(f"no html to inject ({len(body)} bytes)")
         client_w.write(hdr + b"\r\n\r\n" + body)
         await client_w.drain()
 
